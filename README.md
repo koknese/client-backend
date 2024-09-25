@@ -6,10 +6,10 @@ The client app for [MAC](https://github.com/MegaAntiCheat)
 ## Usage steps
 1. Download the latest version from [releases](https://github.com/MegaAntiCheat/client-backend/releases), or build the application yourself (if you know what you're doing)
 2. Add `-condebug -conclearlog -usercon -g15` to your TF2 launch options (Right click the game in your library -> `Properties...`)
-3. Add the following lines to your `autoexec.cfg` file ([learn how to find yours here](https://steamcommunity.com/sharedfiles/filedetails/?id=3112357964))
+3. Add the following lines to your `autoexec.cfg` file ([learn how to find yours here](https://steamcommunity.com/sharedfiles/filedetails/?id=3112357964)), substituting <password> for a password of your choice, and save it.
 ```
 ip 0.0.0.0
-rcon_password mac_rcon
+rcon_password <password>
 net_start
 ```
 4. If you use mastercomfig, you will have to put your `autoexec.cfg` inside the `overrides` folder instead ([more information](https://docs.mastercomfig.com/9.9.3/customization/custom_configs))
@@ -36,7 +36,8 @@ net_start
   - When you launch TF2, open your console and look for a line that looks like `Network: IP 0.0.0.0, mode MP, dedicated No, ports 27015 SV / 27005 CL`
     - If you see this line, `autoexec.cfg` it is being executed
     - If you do not have this line in your console, your `autoexec.cfg` is not being executed
-  - Restart TF2, then paste the commands `ip 0.0.0.0`, `rcon_password mac_rcon` and `net_start` into your console manually
+  - Restart TF2, then paste these commands into your console manually, substituting `<password>` with what you put earlier in your `autoexec.cfg` file.
+    - `ip 0.0.0.0`, `rcon_password <password>` and `net_start`
     - Restart client-backend and see if it can connect afterwards
     - If it successfully connects after that, your `autoexec.cfg` file is not executing
   - Another program may be using that port, you can try change the rcon port that MAC will use
