@@ -137,7 +137,7 @@ fn main() {
         check_launch_options(&state.settings);
     }
 
-    let web_port = state.settings.webui_port();
+    let web_port = state.settings.web_port();
 
     // The juicy part of the program
     tokio::runtime::Builder::new_multi_thread()

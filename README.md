@@ -15,7 +15,7 @@ net_start
 4. If you use mastercomfig, you will have to put your `autoexec.cfg` inside the `overrides` folder instead ([more information](https://docs.mastercomfig.com/9.9.3/customization/custom_configs))
 5. Launch TF2
 6. Run the application
-7. Click on the link in your console window or visit `localhost:3621` in your browser
+7. Click on the link in your console window or visit `localhost:1984` in your browser
 8. You should get a webpage with the UI in it, prompting for a Steam API key and an RCON password.
 9. Get yourself a Steam Web API key from [here](https://steamcommunity.com/dev/apikey)
 10. Enter the RCON password you set in your autoexec.
@@ -88,7 +88,7 @@ To include the provided frontend, run the `include_ui.sh` (linux/mac) or `includ
 
 Alternatively, a custom web UI can be built into the project by placing any files in the `ui` folder at compile time, and they will be served from the web interface. The web UI should include an `index.html` file as this is where the root URL will redirect to.
 
-File are served starting from `http://127.0.0.1:3621/ui/`.
+File are served starting from `http://127.0.0.1:1984/ui/`.
 
 ## Contributing
 Always run `cargo fmt` and resolve any issues reported by `cargo clippy` before submitting your Merge Request.
