@@ -90,7 +90,7 @@ pub struct Settings {
     masterbase_host: String,
     autolaunch_ui: bool,
     friends_api_usage: FriendsAPIUsage,
-    webui_port: u16,
+    web_port: u16,
     rcon_port: u16,
     external: serde_json::Value,
     autokick_bots: bool,
@@ -103,7 +103,7 @@ pub struct Settings {
     #[serde(skip)]
     override_steam_api_key: Option<String>,
     #[serde(skip)]
-    override_webui_port: Option<u16>,
+    override_web_port: Option<u16>,
     #[serde(skip)]
     override_steam_user: Option<SteamID>,
     #[serde(skip)]
@@ -280,11 +280,11 @@ impl Settings {
     /// Will panic if provided the --steam-user flag but not a valid Steam ID 64
     #[allow(clippy::cognitive_complexity)]
     pub fn apply_args(&mut self, args: &Args) {
-        // Override (and log if) the Port used to host the middleware API (default 3621)
-        self.override_webui_port = args.port.map(|val| {
+        // Override (and log if) the Port used to host the middleware API (default 1984)
+        self.override_web_port = args.port.map(|val| {
             tracing::info!(
                 "Overrode configured port value {:?}->{:?}",
-                self.webui_port,
+                self.web_port,
                 val
             );
             val
@@ -527,12 +527,12 @@ impl Settings {
         self.friends_api_usage
     }
 
-    pub fn set_webui_port(&mut self, port: u16) {
-        self.webui_port = port;
+    pub fn set_web_port(&mut self, port: u16) {
+        self.web_port = port;
     }
     #[must_use]
-    pub fn webui_port(&self) -> u16 {
-        self.override_webui_port.unwrap_or(self.webui_port)
+    pub fn web_port(&self) -> u16 {
+        self.override_web_port.unwrap_or(self.web_port)
     }
 
     pub fn set_rcon_port(&mut self, port: u16) {
@@ -629,14 +629,14 @@ impl Default for Settings {
             masterbase_key: String::new(),
             masterbase_host: "megaanticheat.com".into(),
             friends_api_usage: FriendsAPIUsage::CheatersOnly,
-            webui_port: 3621,
+            web_port: 1984,
             autolaunch_ui: false,
             rcon_port: 27015,
             tos_agreement_date: None,
             override_tf2_dir: None,
             override_rcon_password: None,
             override_steam_api_key: None,
-            override_webui_port: None,
+            override_web_port: None,
             override_steam_user: None,
             override_rcon_port: None,
             override_masterbase_api_key: None,
