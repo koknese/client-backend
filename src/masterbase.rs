@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::{Debug, Display, Write},
+    fmt::{Debug, Display},
 };
 
 use futures::SinkExt;
@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::player_records::Verdict;
+use crate::{demo::LateBytes, player_records::Verdict};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -229,35 +229,28 @@ impl DemoSession {
 
     /// # Errors
     /// If the web request to send late bytes was unsuccessful
-    pub async fn send_late_bytes(&self, bytes: Vec<u8>) -> Result<Response, Error> {
+    pub async fn send_late_bytes(&self, bytes: LateBytes) -> Result<Response, Error> {
+        tracing::debug!("Sending late bytes");
+
         #[derive(Serialize)]
-        struct LateBytes {
+        struct LateBytesBody {
             late_bytes: String,
         }
 
-        tracing::debug!("Sending late bytes");
-
-        let params = [("api_key", &self.key)];
+        let params = [
+            ("api_key", &self.key),
+        ];
 
         let endpoint = if self.http {
-            format!("http://{}/late_bytes", self.host)
+            format!("http://{}/close_session", self.host)
         } else {
-            format!("https://{}/late_bytes", self.host)
+            format!("https://{}/close_session", self.host)
         };
 
-        let url = reqwest::Url::parse_with_params(&endpoint, params)?;
-
         let client = Client::new();
-        let late_bytes_hex: String =
-            bytes
-                .iter()
-                .fold(String::with_capacity(bytes.len() * 2), |mut s, byte| {
-                    write!(&mut s, "{byte:02x}").expect("Couldn't write to string??");
-                    s
-                });
-
-        let req: RequestBuilder = client.post(url).json(&LateBytes {
-            late_bytes: late_bytes_hex,
+        let url = reqwest::Url::parse_with_params(&endpoint, params)?;
+        let req: RequestBuilder = client.post(url).json(&LateBytesBody {
+            late_bytes: bytes.to_hex(),
         });
 
         Ok(req.send().await?)
