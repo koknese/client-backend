@@ -28,7 +28,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::command_manager::Command;
 use crate::{
-    events::{InternalPreferences, Preferences, UserUpdate, UserUpdates}, masterbase::MasterbaseBroadcastResponse, player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo}, server::Gamemode, state::MACState, steam_api::{request_steam_info, ProfileLookupResult}
+    events::{InternalPreferences, Preferences, UserUpdate, UserUpdates}, masterbase::{MasterbaseBroadcastLookup, MasterbaseBroadcastResponse}, player::{Friend, FriendInfo, Player, Players, SteamInfo, serialize_steamid_as_string}, server::Gamemode, state::MACState, steam_api::{request_steam_info, ProfileLookupResult}
 };
 const HEADERS: [(header::HeaderName, &str); 2] = [
     (header::CONTENT_TYPE, "application/json"),
@@ -56,7 +56,7 @@ pub enum WebRequest {
     PostCommand(RequestedCommands),
     GetChat(UnboundedSender<String>),
     GetKillfeed(UnboundedSender<String>),
-    GetMasterbaseStatus(UnboundedSender<String>), // TODO: swap with actual json-serializable type
+    GetMasterbaseBroadcasts(UnboundedSender<String>), // TODO: swap with actual json-serializable type
 }
 impl<S> event_loop::Message<S> for WebRequest {}
 
@@ -75,8 +75,8 @@ pub struct WebAPIHandler {
 
 impl<IM, OM> MessageHandler<MACState, IM, OM> for WebAPIHandler
 where
-    IM: Is<WebRequest> + Is<ProfileLookupResult>,
-    OM: Is<Command> + Is<Preferences> + Is<UserUpdates> + Is<ProfileLookupResult>,
+    IM: Is<WebRequest> + Is<ProfileLookupResult> + Is<MasterbaseBroadcastResponse>,
+    OM: Is<Command> + Is<Preferences> + Is<UserUpdates> + Is<ProfileLookupResult> + Is<MasterbaseBroadcastLookup>,
 {
     #[allow(clippy::cognitive_complexity)]
     fn handle_message(
@@ -92,6 +92,10 @@ where
 
         if let Some(lookup_result) = try_get::<ProfileLookupResult>(message) {
             self.handle_profile_lookup(state, lookup_result);
+        }
+
+        if let Some(masterbase_broadcasts) = try_get::<MasterbaseBroadcastResponse>(message) {
+            self.set_masterbase_broadcasts_response(masterbase_broadcasts);
         }
 
         match try_get::<WebRequest>(message)? {
@@ -127,8 +131,8 @@ where
             WebRequest::GetKillfeed(tx) => {
                 send(tx, get_killfeed_response(state));
             }
-            WebRequest::GetMasterbaseStatus(tx) => {
-                self.handle_masterbase_status_request(tx.clone());
+            WebRequest::GetMasterbaseBroadcasts(tx) => {
+                return self.get_masterbase_broadcasts_response(tx.clone());
             }
         }
 
@@ -278,17 +282,23 @@ impl WebAPIHandler {
 
     // Masterbase status
 
-    fn handle_masterbase_status_request(&mut self, req: UnboundedSender<String>) {
+    fn get_masterbase_broadcasts_response<OM: Is<MasterbaseBroadcastLookup>>(&mut self, req: UnboundedSender<String>) -> Option<Handled<OM>> {
         if let Some(cache) = &self.masterbase_status_cache {
             if cache.latest_update + Duration::seconds(60) > Utc::now() {
                 req.send(serde_json::to_string(&cache).expect("Epic serialization fail")).ok();
-                return;
+                return Handled::none();
             } else {
                 self.masterbase_status_cache = None;
             }
-        } else if self.masterbase_status_cache.is_none() {
-            req.send(StatusCode::NO_CONTENT.to_string()).ok();
         }
+        if self.masterbase_status_cache.is_none() {
+            return Handled::single(MasterbaseBroadcastLookup)
+        }
+        Handled::none()
+    }
+
+    fn set_masterbase_broadcasts_response(&mut self, result: &MasterbaseBroadcastResponse) {
+        self.masterbase_status_cache = Some(result.clone());
     }
 }
 
@@ -745,7 +755,7 @@ fn get_killfeed_response(state: &MACState) -> String {
 async fn get_masterbase_broadcasts(State(state): State<WebState>) -> impl IntoResponse {
     tracing::debug!("API: GET Masterbase broadcasts");
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    if state.request.send(WebRequest::GetMasterbaseStatus(tx)).is_err() {
+    if state.request.send(WebRequest::GetMasterbaseBroadcasts(tx)).is_err() {
         tracing::error!("Couldn't send API request to main thread.");
     }
     (rx.recv().await).map_or_else(

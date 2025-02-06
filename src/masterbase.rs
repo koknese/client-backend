@@ -4,6 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use event_loop::{try_get, Handled, Is, Message, MessageHandler};
 use futures::SinkExt;
 use reqwest::{Client, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use thiserror::Error;
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::{demo::LateBytes, player_records::Verdict};
+use crate::{demo::LateBytes, player_records::Verdict, state::MACState};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -286,7 +287,9 @@ pub async fn force_close_session(host: &str, key: &str, http: bool) -> Result<Re
     Ok(reqwest::get(url).await?)
 }
 
-#[derive(Serialize)]
+// Masterbase Broadcasts
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum MasterbaseBroadcastImportance {
     INFO,
     UPDATE,
@@ -294,15 +297,75 @@ pub enum MasterbaseBroadcastImportance {
     CRITICAL
 }
 
-#[derive(Serialize)]
-pub struct MasterbaseBroadcastResponse {
-    pub latest_update: DateTime<Utc>,
-    pub broadcasts: Vec<MasterbaseBroadcast>,
-}
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MasterbaseBroadcast {
     pub message: String,
     pub post_date: DateTime<Utc>,
     pub importance: MasterbaseBroadcastImportance,
 }
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MasterbaseBroadcastResponse {
+    pub latest_update: DateTime<Utc>,
+    pub broadcasts: Vec<MasterbaseBroadcast>,
+}
+impl Message<MACState> for MasterbaseBroadcastResponse {
+    fn update_state(self, _: &mut MACState) {}
+}
+
+pub struct MasterbaseBroadcastTick;
+impl<S> event_loop::Message<S> for MasterbaseBroadcastTick {}
+
 pub struct MasterbaseBroadcastLookup;
+impl Message<MACState> for MasterbaseBroadcastLookup {
+    fn update_state(self, _: &mut MACState) {}
+}
+
+pub struct MasterbaseBroadcastHandler;
+impl MasterbaseBroadcastHandler {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl<IM, OM> MessageHandler<MACState, IM, OM> for MasterbaseBroadcastHandler
+where
+    IM: Is<MasterbaseBroadcastLookup> + Is<MasterbaseBroadcastTick>,
+    OM: Is<MasterbaseBroadcastResponse>,
+{
+    fn handle_message(&mut self, state: &MACState, message: &IM) -> Option<event_loop::Handled<OM>> {
+
+        if let Some(_) = try_get::<MasterbaseBroadcastLookup>(message) {
+            tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastLookup");
+        } else if let Some(_) = try_get::<MasterbaseBroadcastTick>(message) {
+            tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastTick");
+        } else {
+            return None;
+        }
+
+        let http = state.settings.use_masterbase_http();
+        let masterbase_host = state.settings.masterbase_host().to_owned();
+        Handled::future(async move {
+            let client = Client::new();
+            let endpoint = if http {
+                format!("http://{}/broadcasts", masterbase_host)
+            } else {
+                format!("https://{}/broadcasts", masterbase_host)
+            };
+
+            tracing::debug!("GET: {}", endpoint);
+            let response = match client.get(&endpoint).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    // TODO: prevent this error from being spammed when connection dies.
+                    tracing::error!("Failed to get broadcasts: {:?}", e);
+                    return None;
+                }
+            };
+
+            let broadcasts: MasterbaseBroadcastResponse = response.json().await.expect("Failed to parse broadcasts");
+
+            Some(OM::from(broadcasts.clone()))
+        })
+    }
+}
