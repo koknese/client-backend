@@ -13,7 +13,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use event_loop::{try_get, Handled, Is, MessageHandler};
 use futures::Stream;
 use include_dir::Dir;
@@ -28,11 +28,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::command_manager::Command;
 use crate::{
-    events::{InternalPreferences, Preferences, UserUpdate, UserUpdates},
-    player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo},
-    server::Gamemode,
-    state::MACState,
-    steam_api::{request_steam_info, ProfileLookupResult},
+    events::{InternalPreferences, Preferences, UserUpdate, UserUpdates}, masterbase::MasterbaseBroadcastResponse, player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo}, server::Gamemode, state::MACState, steam_api::{request_steam_info, ProfileLookupResult}
 };
 const HEADERS: [(header::HeaderName, &str); 2] = [
     (header::CONTENT_TYPE, "application/json"),
@@ -60,6 +56,7 @@ pub enum WebRequest {
     PostCommand(RequestedCommands),
     GetChat(UnboundedSender<String>),
     GetKillfeed(UnboundedSender<String>),
+    GetMasterbaseStatus(UnboundedSender<String>), // TODO: swap with actual json-serializable type
 }
 impl<S> event_loop::Message<S> for WebRequest {}
 
@@ -73,6 +70,7 @@ struct PostUserRequest {
 pub struct WebAPIHandler {
     profile_requests_in_progress: Vec<SteamID>,
     post_user_queue: Vec<PostUserRequest>,
+    masterbase_status_cache: Option<MasterbaseBroadcastResponse>,
 }
 
 impl<IM, OM> MessageHandler<MACState, IM, OM> for WebAPIHandler
@@ -129,6 +127,9 @@ where
             WebRequest::GetKillfeed(tx) => {
                 send(tx, get_killfeed_response(state));
             }
+            WebRequest::GetMasterbaseStatus(tx) => {
+                self.handle_masterbase_status_request(tx.clone());
+            }
         }
 
         Handled::none()
@@ -141,8 +142,11 @@ impl WebAPIHandler {
         Self {
             profile_requests_in_progress: Vec::new(),
             post_user_queue: Vec::new(),
+            masterbase_status_cache: None,
         }
     }
+
+    // POST user
 
     fn handle_post_user_request<OM: Is<ProfileLookupResult>>(
         &mut self,
@@ -271,6 +275,21 @@ impl WebAPIHandler {
         self.post_user_queue
             .retain(|req| !req.waiting_users.is_empty());
     }
+
+    // Masterbase status
+
+    fn handle_masterbase_status_request(&mut self, req: UnboundedSender<String>) {
+        if let Some(cache) = &self.masterbase_status_cache {
+            if cache.latest_update + Duration::seconds(60) > Utc::now() {
+                req.send(serde_json::to_string(&cache).expect("Epic serialization fail")).ok();
+                return;
+            } else {
+                self.masterbase_status_cache = None;
+            }
+        } else if self.masterbase_status_cache.is_none() {
+            req.send(StatusCode::NO_CONTENT.to_string()).ok();
+        }
+    }
 }
 
 impl Default for WebAPIHandler {
@@ -321,6 +340,7 @@ pub async fn web_main(web_state: WebState, port: u16) {
         .route("/mac/commands/v1", post(post_commands))
         .route("/mac/chat/v1", get(get_chat))
         .route("/mac/killfeed/v1", get(get_killfeed))
+        .route("/mac/broadcasts/v1", get(get_masterbase_broadcasts))
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(web_state);
 
@@ -718,6 +738,20 @@ async fn get_killfeed(State(state): State<WebState>) -> impl IntoResponse {
 
 fn get_killfeed_response(state: &MACState) -> String {
     serde_json::to_string(state.server.kill_history()).expect("Epic serialization fail")
+}
+
+// Masterbase status
+
+async fn get_masterbase_broadcasts(State(state): State<WebState>) -> impl IntoResponse {
+    tracing::debug!("API: GET Masterbase broadcasts");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    if state.request.send(WebRequest::GetMasterbaseStatus(tx)).is_err() {
+        tracing::error!("Couldn't send API request to main thread.");
+    }
+    (rx.recv().await).map_or_else(
+        || (StatusCode::SERVICE_UNAVAILABLE, HEADERS, String::new()),
+        |resp| (StatusCode::OK, HEADERS, resp),
+    )
 }
 
 // Commands

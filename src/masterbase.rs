@@ -3,6 +3,7 @@ use std::{
     fmt::{Debug, Display},
 };
 
+use chrono::{DateTime, Utc};
 use futures::SinkExt;
 use reqwest::{Client, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
@@ -284,3 +285,24 @@ pub async fn force_close_session(host: &str, key: &str, http: bool) -> Result<Re
 
     Ok(reqwest::get(url).await?)
 }
+
+#[derive(Serialize)]
+pub enum MasterbaseBroadcastImportance {
+    INFO,
+    UPDATE,
+    WARNING,
+    CRITICAL
+}
+
+#[derive(Serialize)]
+pub struct MasterbaseBroadcastResponse {
+    pub latest_update: DateTime<Utc>,
+    pub broadcasts: Vec<MasterbaseBroadcast>,
+}
+#[derive(Serialize)]
+pub struct MasterbaseBroadcast {
+    pub message: String,
+    pub post_date: DateTime<Utc>,
+    pub importance: MasterbaseBroadcastImportance,
+}
+pub struct MasterbaseBroadcastLookup;
