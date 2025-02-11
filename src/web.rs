@@ -788,6 +788,7 @@ pub const MAC_VERSION: &str  = "v0.2.0";
 pub const UPDATE_REPO: &str = "MegaAntiCheat/client-backend";
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct UserVersionResponse {
     current_version: String,
     latest_version: String,
