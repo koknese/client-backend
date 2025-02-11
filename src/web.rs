@@ -28,7 +28,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::command_manager::Command;
 use crate::{
-    events::{InternalPreferences, Preferences, UserUpdate, UserUpdates}, masterbase::{MasterbaseBroadcastLookup, MasterbaseBroadcastResponse}, player::{Friend, FriendInfo, Player, Players, SteamInfo, serialize_steamid_as_string}, server::Gamemode, state::MACState, steam_api::{request_steam_info, ProfileLookupResult}
+    events::{GitHubVersionLookup, GitHubVersionResponse, InternalPreferences, Preferences, UserUpdate, UserUpdates}, masterbase::{MasterbaseBroadcastLookup, MasterbaseBroadcastResponse}, player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo}, server::Gamemode, state::MACState, steam_api::{request_steam_info, ProfileLookupResult}
 };
 const HEADERS: [(header::HeaderName, &str); 2] = [
     (header::CONTENT_TYPE, "application/json"),
@@ -56,7 +56,8 @@ pub enum WebRequest {
     PostCommand(RequestedCommands),
     GetChat(UnboundedSender<String>),
     GetKillfeed(UnboundedSender<String>),
-    GetMasterbaseBroadcasts(UnboundedSender<String>), // TODO: swap with actual json-serializable type
+    GetMasterbaseBroadcasts(UnboundedSender<String>),
+    GetVersion(UnboundedSender<String>),
 }
 impl<S> event_loop::Message<S> for WebRequest {}
 
@@ -75,8 +76,16 @@ pub struct WebAPIHandler {
 
 impl<IM, OM> MessageHandler<MACState, IM, OM> for WebAPIHandler
 where
-    IM: Is<WebRequest> + Is<ProfileLookupResult> + Is<MasterbaseBroadcastResponse>,
-    OM: Is<Command> + Is<Preferences> + Is<UserUpdates> + Is<ProfileLookupResult> + Is<MasterbaseBroadcastLookup>,
+    IM: Is<WebRequest> +
+        Is<ProfileLookupResult> +
+        Is<MasterbaseBroadcastResponse> +
+        Is<GitHubVersionResponse>,
+    OM: Is<Command> +
+        Is<Preferences> +
+        Is<UserUpdates> +
+        Is<ProfileLookupResult> +
+        Is<MasterbaseBroadcastLookup> +
+        Is<GitHubVersionLookup>,
 {
     #[allow(clippy::cognitive_complexity)]
     fn handle_message(
@@ -96,6 +105,11 @@ where
 
         if let Some(masterbase_broadcasts) = try_get::<MasterbaseBroadcastResponse>(message) {
             self.set_masterbase_broadcasts_response(masterbase_broadcasts);
+        }
+
+        if let Some(version_result) = try_get::<GitHubVersionResponse>(message) {
+            tracing::debug!("reply from github reached webhandler");
+            send(&version_result.tx, get_version_response(version_result));
         }
 
         match try_get::<WebRequest>(message)? {
@@ -133,6 +147,9 @@ where
             }
             WebRequest::GetMasterbaseBroadcasts(tx) => {
                 return self.get_masterbase_broadcasts_response(tx.clone());
+            }
+            WebRequest::GetVersion(tx) => {
+                return Handled::single(OM::from(GitHubVersionLookup { tx: tx.clone() }));
             }
         }
 
@@ -351,6 +368,7 @@ pub async fn web_main(web_state: WebState, port: u16) {
         .route("/mac/chat/v1", get(get_chat))
         .route("/mac/killfeed/v1", get(get_killfeed))
         .route("/mac/broadcasts/v1", get(get_masterbase_broadcasts))
+        .route("/mac/version/v1", get(get_version))
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(web_state);
 
@@ -762,6 +780,42 @@ async fn get_masterbase_broadcasts(State(state): State<WebState>) -> impl IntoRe
         || (StatusCode::SERVICE_UNAVAILABLE, HEADERS, String::new()),
         |resp| (StatusCode::OK, HEADERS, resp),
     )
+}
+
+// Check for updates
+
+pub const MAC_VERSION: &str  = "v0.2.0";
+pub const UPDATE_REPO: &str = "MegaAntiCheat/client-backend";
+
+#[derive(Serialize, Debug)]
+struct UserVersionResponse {
+    current_version: String,
+    latest_version: String,
+    notify: bool,
+}
+
+async fn get_version(State(state): State<WebState>) -> impl IntoResponse {
+    tracing::debug!("API: GET version");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    if state.request.send(WebRequest::GetVersion(tx)).is_err() {
+        tracing::error!("Couldn't send API request to main thread.");
+    }
+    (rx.recv().await).map_or_else(
+        || (StatusCode::SERVICE_UNAVAILABLE, HEADERS, String::new()),
+        |resp| (StatusCode::OK, HEADERS, resp),
+    )
+}
+
+fn get_version_response(message: &GitHubVersionResponse) -> String {
+    let current_version = MAC_VERSION.to_string();
+    let latest_version = message.latest_version.to_owned();
+    let response: UserVersionResponse = UserVersionResponse {
+        notify: &latest_version > &current_version,
+        current_version,
+        latest_version,
+    };
+    tracing::debug!("Version info: {:?}", &response);
+    return serde_json::to_string(&response).expect("Epic serialization fail");
 }
 
 // Commands

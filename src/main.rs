@@ -11,7 +11,7 @@ use std::{
 use args::Args;
 use clap::Parser;
 use event_loop::{define_events, EventLoop};
-use events::emit_on_timer;
+use events::{emit_on_timer, GitHubVersionHandler, GitHubVersionLookup, GitHubVersionResponse};
 use launchoptions::LaunchOptions;
 use masterbase::{MasterbaseBroadcastHandler, MasterbaseBroadcastLookup, MasterbaseBroadcastResponse, MasterbaseBroadcastTick};
 use player::Players;
@@ -87,6 +87,9 @@ define_events!(
         MasterbaseBroadcastTick,
         MasterbaseBroadcastLookup,
         MasterbaseBroadcastResponse,
+
+        GitHubVersionLookup,
+        GitHubVersionResponse
     },
     Handler {
         CommandManager,
@@ -100,6 +103,7 @@ define_events!(
         SseEventBroadcaster,
         
         MasterbaseBroadcastHandler,
+        GitHubVersionHandler,
 
         DemoManager,
         PrintVotes,
@@ -253,6 +257,7 @@ fn main() {
                 .add_handler(DumbAutoKick)
                 .add_handler(WebAPIHandler::new())
                 .add_handler(MasterbaseBroadcastHandler::new())
+                .add_handler(GitHubVersionHandler)
                 .add_handler(SseEventBroadcaster::new());
 
             if args.print_votes {
