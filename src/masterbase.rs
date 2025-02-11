@@ -289,7 +289,7 @@ pub async fn force_close_session(host: &str, key: &str, http: bool) -> Result<Re
 
 // Masterbase Broadcasts
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum MasterbaseBroadcastImportance {
     INFO,
     UPDATE,
@@ -297,14 +297,14 @@ pub enum MasterbaseBroadcastImportance {
     CRITICAL
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MasterbaseBroadcast {
     pub message: String,
     pub post_date: DateTime<Utc>,
     pub importance: MasterbaseBroadcastImportance,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MasterbaseBroadcastResponse {
     pub latest_update: DateTime<Utc>,
     pub broadcasts: Vec<MasterbaseBroadcast>,
@@ -363,9 +363,13 @@ where
                 }
             };
 
-            let broadcasts: MasterbaseBroadcastResponse = response.json().await.expect("Failed to parse broadcasts");
+            let broadcasts = response.json().await.expect("Failed to parse broadcasts");
+            let broadcast_response: MasterbaseBroadcastResponse = MasterbaseBroadcastResponse {
+                latest_update: Utc::now(),
+                broadcasts                
+            };
 
-            Some(OM::from(broadcasts.clone()))
+            Some(OM::from(broadcast_response.clone()))
         })
     }
 }
