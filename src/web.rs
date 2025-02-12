@@ -28,7 +28,15 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::command_manager::Command;
 use crate::{
-    events::{GitHubVersionLookup, GitHubVersionResponse, InternalPreferences, Preferences, UserUpdate, UserUpdates}, masterbase::{MasterbaseBroadcastLookup, MasterbaseBroadcastResponse}, player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo}, server::Gamemode, state::MACState, steam_api::{request_steam_info, ProfileLookupResult}
+    events::{
+        GitHubVersionLookup, GitHubVersionResponse, InternalPreferences, Preferences, UserUpdate,
+        UserUpdates,
+    },
+    masterbase::{MasterbaseBroadcastLookup, MasterbaseBroadcastResponse},
+    player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo},
+    server::Gamemode,
+    state::MACState,
+    steam_api::{request_steam_info, ProfileLookupResult},
 };
 const HEADERS: [(header::HeaderName, &str); 2] = [
     (header::CONTENT_TYPE, "application/json"),
@@ -76,16 +84,16 @@ pub struct WebAPIHandler {
 
 impl<IM, OM> MessageHandler<MACState, IM, OM> for WebAPIHandler
 where
-    IM: Is<WebRequest> +
-        Is<ProfileLookupResult> +
-        Is<MasterbaseBroadcastResponse> +
-        Is<GitHubVersionResponse>,
-    OM: Is<Command> +
-        Is<Preferences> +
-        Is<UserUpdates> +
-        Is<ProfileLookupResult> +
-        Is<MasterbaseBroadcastLookup> +
-        Is<GitHubVersionLookup>,
+    IM: Is<WebRequest>
+        + Is<ProfileLookupResult>
+        + Is<MasterbaseBroadcastResponse>
+        + Is<GitHubVersionResponse>,
+    OM: Is<Command>
+        + Is<Preferences>
+        + Is<UserUpdates>
+        + Is<ProfileLookupResult>
+        + Is<MasterbaseBroadcastLookup>
+        + Is<GitHubVersionLookup>,
 {
     #[allow(clippy::cognitive_complexity)]
     fn handle_message(
@@ -299,17 +307,21 @@ impl WebAPIHandler {
 
     // Masterbase status
 
-    fn get_masterbase_broadcasts_response<OM: Is<MasterbaseBroadcastLookup>>(&mut self, req: UnboundedSender<String>) -> Option<Handled<OM>> {
+    fn get_masterbase_broadcasts_response<OM: Is<MasterbaseBroadcastLookup>>(
+        &mut self,
+        req: UnboundedSender<String>,
+    ) -> Option<Handled<OM>> {
         if let Some(cache) = &self.masterbase_status_cache {
             if cache.latest_update + Duration::seconds(60) > Utc::now() {
-                req.send(serde_json::to_string(&cache).expect("Epic serialization fail")).ok();
+                req.send(serde_json::to_string(&cache).expect("Epic serialization fail"))
+                    .ok();
                 return Handled::none();
             } else {
                 self.masterbase_status_cache = None;
             }
         }
         if self.masterbase_status_cache.is_none() {
-            return Handled::single(MasterbaseBroadcastLookup)
+            return Handled::single(MasterbaseBroadcastLookup);
         }
         Handled::none()
     }
@@ -773,7 +785,11 @@ fn get_killfeed_response(state: &MACState) -> String {
 async fn get_masterbase_broadcasts(State(state): State<WebState>) -> impl IntoResponse {
     tracing::debug!("API: GET Masterbase broadcasts");
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    if state.request.send(WebRequest::GetMasterbaseBroadcasts(tx)).is_err() {
+    if state
+        .request
+        .send(WebRequest::GetMasterbaseBroadcasts(tx))
+        .is_err()
+    {
         tracing::error!("Couldn't send API request to main thread.");
     }
     (rx.recv().await).map_or_else(
@@ -784,7 +800,7 @@ async fn get_masterbase_broadcasts(State(state): State<WebState>) -> impl IntoRe
 
 // Check for updates
 
-pub const MAC_VERSION: &str  = "v0.2.0";
+pub const MAC_VERSION: &str = "v0.2.0";
 pub const UPDATE_REPO: &str = "MegaAntiCheat/client-backend";
 
 #[derive(Serialize, Debug)]

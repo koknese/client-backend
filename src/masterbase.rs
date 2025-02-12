@@ -239,9 +239,7 @@ impl DemoSession {
             late_bytes: String,
         }
 
-        let params = [
-            ("api_key", &self.key),
-        ];
+        let params = [("api_key", &self.key)];
 
         let endpoint = if self.http {
             format!("http://{}/close_session", self.host)
@@ -294,7 +292,7 @@ pub enum MasterbaseBroadcastImportance {
     INFO,
     UPDATE,
     WARNING,
-    CRITICAL
+    CRITICAL,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -333,8 +331,11 @@ where
     IM: Is<MasterbaseBroadcastLookup> + Is<MasterbaseBroadcastTick>,
     OM: Is<MasterbaseBroadcastResponse>,
 {
-    fn handle_message(&mut self, state: &MACState, message: &IM) -> Option<event_loop::Handled<OM>> {
-
+    fn handle_message(
+        &mut self,
+        state: &MACState,
+        message: &IM,
+    ) -> Option<event_loop::Handled<OM>> {
         if let Some(_) = try_get::<MasterbaseBroadcastLookup>(message) {
             tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastLookup");
         } else if let Some(_) = try_get::<MasterbaseBroadcastTick>(message) {
@@ -366,7 +367,7 @@ where
             let broadcasts = response.json().await.expect("Failed to parse broadcasts");
             let broadcast_response: MasterbaseBroadcastResponse = MasterbaseBroadcastResponse {
                 latest_update: Utc::now(),
-                broadcasts                
+                broadcasts,
             };
 
             Some(OM::from(broadcast_response.clone()))

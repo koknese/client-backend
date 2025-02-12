@@ -72,9 +72,11 @@ pub struct LateBytes {
 }
 
 impl LateBytes {
-    pub fn to_hex(&self) -> String
-    {
-        self.bytes.iter().map(|byte| format!("{:02x}", byte)).collect()
+    pub fn to_hex(&self) -> String {
+        self.bytes
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect()
     }
 }
 

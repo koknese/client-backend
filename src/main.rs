@@ -13,7 +13,10 @@ use clap::Parser;
 use event_loop::{define_events, EventLoop};
 use events::{emit_on_timer, GitHubVersionHandler, GitHubVersionLookup, GitHubVersionResponse};
 use launchoptions::LaunchOptions;
-use masterbase::{MasterbaseBroadcastHandler, MasterbaseBroadcastLookup, MasterbaseBroadcastResponse, MasterbaseBroadcastTick};
+use masterbase::{
+    MasterbaseBroadcastHandler, MasterbaseBroadcastLookup, MasterbaseBroadcastResponse,
+    MasterbaseBroadcastTick,
+};
 use player::Players;
 use player_records::PlayerRecords;
 use reqwest::StatusCode;
@@ -101,7 +104,7 @@ define_events!(
 
         WebAPIHandler,
         SseEventBroadcaster,
-        
+
         MasterbaseBroadcastHandler,
         GitHubVersionHandler,
 
