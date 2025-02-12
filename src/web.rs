@@ -825,14 +825,14 @@ async fn get_version(State(state): State<WebState>) -> impl IntoResponse {
 
 fn get_version_response(message: &GitHubVersionResponse) -> String {
     let current_version = MAC_VERSION.to_string();
-    let latest_version = message.latest_version.to_owned();
+    let latest_version = message.latest_version.clone();
     let response: UserVersionResponse = UserVersionResponse {
         notify: &latest_version > &current_version,
         current_version,
         latest_version,
     };
     tracing::debug!("Version info: {:?}", &response);
-    return serde_json::to_string(&response).expect("Epic serialization fail");
+    serde_json::to_string(&response).expect("Epic serialization fail")
 }
 
 // Commands

@@ -175,8 +175,14 @@ impl Message<MACState> for GitHubVersionResponse {
 }
 
 pub struct GitHubVersionHandler;
+impl Default for GitHubVersionHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GitHubVersionHandler {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self
     }
 }
@@ -195,7 +201,7 @@ where
             return None;
         }
         Handled::future(async move {
-            let endpoint = format!("https://api.github.com/repos/{}/releases", UPDATE_REPO);
+            let endpoint = format!("https://api.github.com/repos/{UPDATE_REPO}/releases");
             let response = match reqwest::Client::new()
                 .get(endpoint)
                 .header("Accept", "application/vnd.github+json")
@@ -233,7 +239,7 @@ where
                 None => {
                     return Some(OM::from(GitHubVersionResponse {
                         latest_version: MAC_VERSION.to_owned(),
-                        tx: tx,
+                        tx,
                     }));
                 }
             };
@@ -243,14 +249,14 @@ where
                 None => {
                     return Some(OM::from(GitHubVersionResponse {
                         latest_version: MAC_VERSION.to_owned(),
-                        tx: tx,
+                        tx,
                     }));
                 }
             };
 
             let broadcast_response: GitHubVersionResponse = GitHubVersionResponse {
                 latest_version: latest_release.unwrap_or(MAC_VERSION).to_string(),
-                tx: tx,
+                tx,
             };
 
             Some(OM::from(broadcast_response))

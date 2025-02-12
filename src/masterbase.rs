@@ -320,8 +320,14 @@ impl Message<MACState> for MasterbaseBroadcastLookup {
 }
 
 pub struct MasterbaseBroadcastHandler;
+impl Default for MasterbaseBroadcastHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MasterbaseBroadcastHandler {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self
     }
 }
@@ -336,9 +342,9 @@ where
         state: &MACState,
         message: &IM,
     ) -> Option<event_loop::Handled<OM>> {
-        if let Some(_) = try_get::<MasterbaseBroadcastLookup>(message) {
+        if try_get::<MasterbaseBroadcastLookup>(message).is_some() {
             tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastLookup");
-        } else if let Some(_) = try_get::<MasterbaseBroadcastTick>(message) {
+        } else if try_get::<MasterbaseBroadcastTick>(message).is_some() {
             tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastTick");
         } else {
             return None;
@@ -349,9 +355,9 @@ where
         Handled::future(async move {
             let client = Client::new();
             let endpoint = if http {
-                format!("http://{}/broadcasts", masterbase_host)
+                format!("http://{masterbase_host}/broadcasts")
             } else {
-                format!("https://{}/broadcasts", masterbase_host)
+                format!("https://{masterbase_host}/broadcasts")
             };
 
             tracing::debug!("GET: {}", endpoint);
