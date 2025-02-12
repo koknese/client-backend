@@ -32,7 +32,7 @@ use crate::{
         GitHubVersionLookup, GitHubVersionResponse, InternalPreferences, Preferences, UserUpdate,
         UserUpdates,
     },
-    masterbase::{MasterbaseBroadcastLookup, MasterbaseBroadcastResponse},
+    masterbase::{BroadcastLookup, BroadcastResponse},
     player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo},
     server::Gamemode,
     state::MACState,
@@ -79,20 +79,20 @@ struct PostUserRequest {
 pub struct WebAPIHandler {
     profile_requests_in_progress: Vec<SteamID>,
     post_user_queue: Vec<PostUserRequest>,
-    masterbase_status_cache: Option<MasterbaseBroadcastResponse>,
+    masterbase_status_cache: Option<BroadcastResponse>,
 }
 
 impl<IM, OM> MessageHandler<MACState, IM, OM> for WebAPIHandler
 where
     IM: Is<WebRequest>
         + Is<ProfileLookupResult>
-        + Is<MasterbaseBroadcastResponse>
+        + Is<BroadcastResponse>
         + Is<GitHubVersionResponse>,
     OM: Is<Command>
         + Is<Preferences>
         + Is<UserUpdates>
         + Is<ProfileLookupResult>
-        + Is<MasterbaseBroadcastLookup>
+        + Is<BroadcastLookup>
         + Is<GitHubVersionLookup>,
 {
     #[allow(clippy::cognitive_complexity)]
@@ -111,7 +111,7 @@ where
             self.handle_profile_lookup(state, lookup_result);
         }
 
-        if let Some(masterbase_broadcasts) = try_get::<MasterbaseBroadcastResponse>(message) {
+        if let Some(masterbase_broadcasts) = try_get::<BroadcastResponse>(message) {
             self.set_masterbase_broadcasts_response(masterbase_broadcasts);
         }
 
@@ -154,7 +154,7 @@ where
                 send(tx, get_killfeed_response(state));
             }
             WebRequest::GetMasterbaseBroadcasts(tx) => {
-                return self.get_masterbase_broadcasts_response(tx.clone());
+                return self.get_masterbase_broadcasts_response(tx);
             }
             WebRequest::GetVersion(tx) => {
                 return Handled::single(OM::from(GitHubVersionLookup { tx: tx.clone() }));
@@ -307,26 +307,25 @@ impl WebAPIHandler {
 
     // Masterbase status
 
-    fn get_masterbase_broadcasts_response<OM: Is<MasterbaseBroadcastLookup>>(
+    fn get_masterbase_broadcasts_response<OM: Is<BroadcastLookup>>(
         &mut self,
-        req: UnboundedSender<String>,
+        req: &UnboundedSender<String>,
     ) -> Option<Handled<OM>> {
         if let Some(cache) = &self.masterbase_status_cache {
             if cache.latest_update + Duration::seconds(60) > Utc::now() {
                 req.send(serde_json::to_string(&cache).expect("Epic serialization fail"))
                     .ok();
                 return Handled::none();
-            } else {
-                self.masterbase_status_cache = None;
             }
+            self.masterbase_status_cache = None;
         }
         if self.masterbase_status_cache.is_none() {
-            return Handled::single(MasterbaseBroadcastLookup);
+            return Handled::single(BroadcastLookup);
         }
         Handled::none()
     }
 
-    fn set_masterbase_broadcasts_response(&mut self, result: &MasterbaseBroadcastResponse) {
+    fn set_masterbase_broadcasts_response(&mut self, result: &BroadcastResponse) {
         self.masterbase_status_cache = Some(result.clone());
     }
 }
@@ -827,7 +826,7 @@ fn get_version_response(message: &GitHubVersionResponse) -> String {
     let current_version = MAC_VERSION.to_string();
     let latest_version = message.latest_version.clone();
     let response: UserVersionResponse = UserVersionResponse {
-        notify: &latest_version > &current_version,
+        notify: latest_version > current_version,
         current_version,
         latest_version,
     };

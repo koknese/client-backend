@@ -72,11 +72,11 @@ pub struct LateBytes {
 }
 
 impl LateBytes {
-    #[must_use] pub fn to_hex(&self) -> String {
+    #[must_use]
+    pub fn to_hex(&self) -> String {
         self.bytes
             .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+            .fold(String::new(), |acc, byte| format!("{acc}{byte:02x}"))
     }
 }
 
@@ -378,11 +378,8 @@ impl DemoManager {
         let current_metadata = metadata(file_path)?;
 
         // Check the file is long enough to have data at the late byte address
-        match current_metadata.len().cmp(&min_valid_filelen) {
-            std::cmp::Ordering::Less => {
-                return Ok(None);
-            }
-            _ => {}
+        if current_metadata.len().cmp(&min_valid_filelen) == std::cmp::Ordering::Less {
+            return Ok(None);
         }
 
         let mut file = File::open(file_path)?;

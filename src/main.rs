@@ -13,10 +13,7 @@ use clap::Parser;
 use event_loop::{define_events, EventLoop};
 use events::{emit_on_timer, GitHubVersionHandler, GitHubVersionLookup, GitHubVersionResponse};
 use launchoptions::LaunchOptions;
-use masterbase::{
-    MasterbaseBroadcastHandler, MasterbaseBroadcastLookup, MasterbaseBroadcastResponse,
-    MasterbaseBroadcastTick,
-};
+use masterbase::{BroadcastHandler, BroadcastLookup, BroadcastResponse, BroadcastTick};
 use player::Players;
 use player_records::PlayerRecords;
 use reqwest::StatusCode;
@@ -87,9 +84,9 @@ define_events!(
         DemoBytes,
         DemoMessage,
 
-        MasterbaseBroadcastTick,
-        MasterbaseBroadcastLookup,
-        MasterbaseBroadcastResponse,
+        BroadcastTick,
+        BroadcastLookup,
+        BroadcastResponse,
 
         GitHubVersionLookup,
         GitHubVersionResponse
@@ -105,7 +102,7 @@ define_events!(
         WebAPIHandler,
         SseEventBroadcaster,
 
-        MasterbaseBroadcastHandler,
+        BroadcastHandler,
         GitHubVersionHandler,
 
         DemoManager,
@@ -249,7 +246,7 @@ fn main() {
                 .add_source(console_log)
                 .add_source(emit_on_timer(Duration::from_secs(3), || Refresh).await)
                 .add_source(emit_on_timer(Duration::from_millis(500), || ProfileLookupBatchTick).await)
-                .add_source(emit_on_timer(Duration::from_secs(15), || MasterbaseBroadcastTick).await)
+                .add_source(emit_on_timer(Duration::from_secs(15), || BroadcastTick).await)
                 .add_source(Box::new(web_requests))
                 .add_handler(DemoManager::new())
                 .add_handler(CommandManager::new())
@@ -259,7 +256,7 @@ fn main() {
                 .add_handler(LookupFriends::new())
                 .add_handler(DumbAutoKick)
                 .add_handler(WebAPIHandler::new())
-                .add_handler(MasterbaseBroadcastHandler::new())
+                .add_handler(BroadcastHandler::new())
                 .add_handler(GitHubVersionHandler)
                 .add_handler(SseEventBroadcaster::new());
 

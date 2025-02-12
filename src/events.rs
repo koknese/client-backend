@@ -182,7 +182,8 @@ impl Default for GitHubVersionHandler {
 }
 
 impl GitHubVersionHandler {
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }
@@ -228,9 +229,7 @@ where
                     .unwrap_or(default)
                     .iter()
                     .find(|r| {
-                        r.as_object()
-                            .unwrap()
-                            .get("draft")
+                        r.get("draft")
                             .is_some_and(|d| d.as_bool().is_some_and(|d| !d))
                     });
 

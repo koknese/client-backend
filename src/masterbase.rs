@@ -232,12 +232,12 @@ impl DemoSession {
     /// # Errors
     /// If the web request to send late bytes was unsuccessful
     pub async fn send_late_bytes(&self, bytes: LateBytes) -> Result<Response, Error> {
-        tracing::debug!("Sending late bytes");
-
         #[derive(Serialize)]
         struct LateBytesBody {
             late_bytes: String,
         }
+
+        tracing::debug!("Sending late bytes");
 
         let params = [("api_key", &self.key)];
 
@@ -288,7 +288,8 @@ pub async fn force_close_session(host: &str, key: &str, http: bool) -> Result<Re
 // Masterbase Broadcasts
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum MasterbaseBroadcastImportance {
+#[allow(clippy::upper_case_acronyms)]
+pub enum BroadcastImportance {
     INFO,
     UPDATE,
     WARNING,
@@ -296,55 +297,56 @@ pub enum MasterbaseBroadcastImportance {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct MasterbaseBroadcast {
+pub struct Broadcast {
     pub message: String,
     pub post_date: DateTime<Utc>,
-    pub importance: MasterbaseBroadcastImportance,
+    pub importance: BroadcastImportance,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct MasterbaseBroadcastResponse {
+pub struct BroadcastResponse {
     pub latest_update: DateTime<Utc>,
-    pub broadcasts: Vec<MasterbaseBroadcast>,
+    pub broadcasts: Vec<Broadcast>,
 }
-impl Message<MACState> for MasterbaseBroadcastResponse {
+impl Message<MACState> for BroadcastResponse {
     fn update_state(self, _: &mut MACState) {}
 }
 
-pub struct MasterbaseBroadcastTick;
-impl<S> event_loop::Message<S> for MasterbaseBroadcastTick {}
+pub struct BroadcastTick;
+impl<S> event_loop::Message<S> for BroadcastTick {}
 
-pub struct MasterbaseBroadcastLookup;
-impl Message<MACState> for MasterbaseBroadcastLookup {
+pub struct BroadcastLookup;
+impl Message<MACState> for BroadcastLookup {
     fn update_state(self, _: &mut MACState) {}
 }
 
-pub struct MasterbaseBroadcastHandler;
-impl Default for MasterbaseBroadcastHandler {
+pub struct BroadcastHandler;
+impl Default for BroadcastHandler {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MasterbaseBroadcastHandler {
-    #[must_use] pub fn new() -> Self {
+impl BroadcastHandler {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }
 
-impl<IM, OM> MessageHandler<MACState, IM, OM> for MasterbaseBroadcastHandler
+impl<IM, OM> MessageHandler<MACState, IM, OM> for BroadcastHandler
 where
-    IM: Is<MasterbaseBroadcastLookup> + Is<MasterbaseBroadcastTick>,
-    OM: Is<MasterbaseBroadcastResponse>,
+    IM: Is<BroadcastLookup> + Is<BroadcastTick>,
+    OM: Is<BroadcastResponse>,
 {
     fn handle_message(
         &mut self,
         state: &MACState,
         message: &IM,
     ) -> Option<event_loop::Handled<OM>> {
-        if try_get::<MasterbaseBroadcastLookup>(message).is_some() {
+        if try_get::<BroadcastLookup>(message).is_some() {
             tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastLookup");
-        } else if try_get::<MasterbaseBroadcastTick>(message).is_some() {
+        } else if try_get::<BroadcastTick>(message).is_some() {
             tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastTick");
         } else {
             return None;
@@ -371,7 +373,7 @@ where
             };
 
             let broadcasts = response.json().await.expect("Failed to parse broadcasts");
-            let broadcast_response: MasterbaseBroadcastResponse = MasterbaseBroadcastResponse {
+            let broadcast_response: BroadcastResponse = BroadcastResponse {
                 latest_update: Utc::now(),
                 broadcasts,
             };
