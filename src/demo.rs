@@ -67,6 +67,19 @@ pub struct DemoBytes {
 }
 impl<S> event_loop::Message<S> for DemoBytes {}
 
+pub struct LateBytes {
+    bytes: [u8; 16],
+}
+
+impl LateBytes {
+    #[must_use]
+    pub fn to_hex(&self) -> String {
+        self.bytes
+            .iter()
+            .fold(String::new(), |acc, byte| format!("{acc}{byte:02x}"))
+    }
+}
+
 #[allow(clippy::module_name_repetitions)]
 pub struct DemoWatcher {
     recv: Receiver<Event>,
@@ -353,7 +366,7 @@ impl DemoManager {
     ///
     /// # Errors
     /// On IO errors
-    fn read_late_bytes(&self) -> std::io::Result<Option<Vec<u8>>> {
+    fn read_late_bytes(&self) -> std::io::Result<Option<LateBytes>> {
         let Some(file_path) = self.current_demo_path() else {
             return Ok(None);
         };
@@ -365,11 +378,8 @@ impl DemoManager {
         let current_metadata = metadata(file_path)?;
 
         // Check the file is long enough to have data at the late byte address
-        match current_metadata.len().cmp(&min_valid_filelen) {
-            std::cmp::Ordering::Less => {
-                return Ok(None);
-            }
-            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => {}
+        if current_metadata.len().cmp(&min_valid_filelen) == std::cmp::Ordering::Less {
+            return Ok(None);
         }
 
         let mut file = File::open(file_path)?;
@@ -384,9 +394,11 @@ impl DemoManager {
 
         if written {
             tracing::debug!("Late bytes found in demo recording.");
-            Ok(Some(out))
+            let mut late_bytes: LateBytes = LateBytes { bytes: [0u8; 16] };
+            late_bytes.bytes.copy_from_slice(&out);
+            Ok(Some(late_bytes))
         } else {
-            tracing::debug!("No new bytes from demo.");
+            tracing::debug!("No late bytes from demo.");
             Ok(None)
         }
     }
@@ -425,7 +437,7 @@ impl DemoManager {
     /// Returns an event that checks for and handles the late bytes for the
     /// current demo.
     /// This event needs to be handled by the event loop to take effect.
-    fn handle_late_bytes<M: Is<DemoMessage>>(&self, late_bytes: Vec<u8>) -> Option<Handled<M>> {
+    fn handle_late_bytes<M: Is<DemoMessage>>(&self, late_bytes: LateBytes) -> Option<Handled<M>> {
         let mut session = self.session.clone();
         Handled::future(async move {
             let mut session_lock = session.get().await;

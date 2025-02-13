@@ -1,12 +1,18 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use chrono::DateTime;
-use event_loop::Message;
+use event_loop::{try_get, Handled, Is, Message, MessageHandler};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use steamid_ng::SteamID;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, UnboundedSender};
 
-use crate::{player_records::Verdict, settings::FriendsAPIUsage, state::MACState};
+use crate::{
+    player_records::Verdict,
+    settings::FriendsAPIUsage,
+    state::MACState,
+    web::{MAC_VERSION, UPDATE_REPO},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Refresh;
@@ -149,5 +155,110 @@ impl Message<MACState> for Preferences {
         }
 
         state.settings.save_ok();
+    }
+}
+
+pub struct GitHubVersionLookup {
+    pub tx: UnboundedSender<String>,
+}
+
+impl Message<MACState> for GitHubVersionLookup {
+    fn update_state(self, _: &mut MACState) {}
+}
+pub struct GitHubVersionResponse {
+    pub latest_version: String,
+    pub tx: UnboundedSender<String>,
+}
+
+impl Message<MACState> for GitHubVersionResponse {
+    fn update_state(self, _: &mut MACState) {}
+}
+
+pub struct GitHubVersionHandler;
+impl Default for GitHubVersionHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GitHubVersionHandler {
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl<IM, OM> MessageHandler<MACState, IM, OM> for GitHubVersionHandler
+where
+    IM: Is<GitHubVersionLookup>,
+    OM: Is<GitHubVersionResponse>,
+{
+    fn handle_message(&mut self, _: &MACState, message: &IM) -> Option<event_loop::Handled<OM>> {
+        let tx;
+        if let Some(msg) = try_get::<GitHubVersionLookup>(message) {
+            tx = msg.tx.clone();
+            tracing::debug!("Attempting to fetch latest version from GitHub");
+        } else {
+            return None;
+        }
+        Handled::future(async move {
+            let endpoint = format!("https://api.github.com/repos/{UPDATE_REPO}/releases");
+            let response = match reqwest::Client::new()
+                .get(endpoint)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "reqwest")
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    // TODO: prevent this error from being spammed when connection dies.
+                    tracing::error!("Failed to get github release info: {:?}", e);
+                    return None;
+                }
+            };
+
+            let response_json: Value = response
+                .json()
+                .await
+                .expect("Failed to parse github release info");
+            let default = &vec![];
+            let latest_release_json =
+                response_json
+                    .as_array()
+                    .unwrap_or(default)
+                    .iter()
+                    .find(|r| {
+                        r.get("draft")
+                            .is_some_and(|d| d.as_bool().is_some_and(|d| !d))
+                    });
+
+            let latest_release_json = match latest_release_json {
+                Some(lr) => lr.to_owned(),
+                None => {
+                    return Some(OM::from(GitHubVersionResponse {
+                        latest_version: MAC_VERSION.to_owned(),
+                        tx,
+                    }));
+                }
+            };
+
+            let latest_release = match latest_release_json.get("tag_name") {
+                Some(lr) => lr.as_str(),
+                None => {
+                    return Some(OM::from(GitHubVersionResponse {
+                        latest_version: MAC_VERSION.to_owned(),
+                        tx,
+                    }));
+                }
+            };
+
+            let broadcast_response: GitHubVersionResponse = GitHubVersionResponse {
+                latest_version: latest_release.unwrap_or(MAC_VERSION).to_string(),
+                tx,
+            };
+
+            Some(OM::from(broadcast_response))
+        })
     }
 }

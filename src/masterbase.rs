@@ -1,8 +1,10 @@
 use std::{
     collections::HashMap,
-    fmt::{Debug, Display, Write},
+    fmt::{Debug, Display},
 };
 
+use chrono::{DateTime, Utc};
+use event_loop::{try_get, Handled, Is, Message, MessageHandler};
 use futures::SinkExt;
 use reqwest::{Client, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
@@ -11,7 +13,7 @@ use thiserror::Error;
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::player_records::Verdict;
+use crate::{demo::LateBytes, player_records::Verdict, state::MACState};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -229,9 +231,9 @@ impl DemoSession {
 
     /// # Errors
     /// If the web request to send late bytes was unsuccessful
-    pub async fn send_late_bytes(&self, bytes: Vec<u8>) -> Result<Response, Error> {
+    pub async fn send_late_bytes(&self, bytes: LateBytes) -> Result<Response, Error> {
         #[derive(Serialize)]
-        struct LateBytes {
+        struct LateBytesBody {
             late_bytes: String,
         }
 
@@ -240,24 +242,15 @@ impl DemoSession {
         let params = [("api_key", &self.key)];
 
         let endpoint = if self.http {
-            format!("http://{}/late_bytes", self.host)
+            format!("http://{}/close_session", self.host)
         } else {
-            format!("https://{}/late_bytes", self.host)
+            format!("https://{}/close_session", self.host)
         };
 
-        let url = reqwest::Url::parse_with_params(&endpoint, params)?;
-
         let client = Client::new();
-        let late_bytes_hex: String =
-            bytes
-                .iter()
-                .fold(String::with_capacity(bytes.len() * 2), |mut s, byte| {
-                    write!(&mut s, "{byte:02x}").expect("Couldn't write to string??");
-                    s
-                });
-
-        let req: RequestBuilder = client.post(url).json(&LateBytes {
-            late_bytes: late_bytes_hex,
+        let url = reqwest::Url::parse_with_params(&endpoint, params)?;
+        let req: RequestBuilder = client.post(url).json(&LateBytesBody {
+            late_bytes: bytes.to_hex(),
         });
 
         Ok(req.send().await?)
@@ -290,4 +283,102 @@ pub async fn force_close_session(host: &str, key: &str, http: bool) -> Result<Re
     let url = reqwest::Url::parse_with_params(&endpoint, params)?;
 
     Ok(reqwest::get(url).await?)
+}
+
+// Masterbase Broadcasts
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum BroadcastImportance {
+    INFO,
+    UPDATE,
+    WARNING,
+    CRITICAL,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Broadcast {
+    pub message: String,
+    pub post_date: DateTime<Utc>,
+    pub importance: BroadcastImportance,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BroadcastResponse {
+    pub latest_update: DateTime<Utc>,
+    pub broadcasts: Vec<Broadcast>,
+}
+impl Message<MACState> for BroadcastResponse {
+    fn update_state(self, _: &mut MACState) {}
+}
+
+pub struct BroadcastTick;
+impl<S> event_loop::Message<S> for BroadcastTick {}
+
+pub struct BroadcastLookup;
+impl Message<MACState> for BroadcastLookup {
+    fn update_state(self, _: &mut MACState) {}
+}
+
+pub struct BroadcastHandler;
+impl Default for BroadcastHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BroadcastHandler {
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl<IM, OM> MessageHandler<MACState, IM, OM> for BroadcastHandler
+where
+    IM: Is<BroadcastLookup> + Is<BroadcastTick>,
+    OM: Is<BroadcastResponse>,
+{
+    fn handle_message(
+        &mut self,
+        state: &MACState,
+        message: &IM,
+    ) -> Option<event_loop::Handled<OM>> {
+        if try_get::<BroadcastLookup>(message).is_some() {
+            tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastLookup");
+        } else if try_get::<BroadcastTick>(message).is_some() {
+            tracing::debug!("Masterbase Broadcast request triggered by MasterbaseBroadcastTick");
+        } else {
+            return None;
+        }
+
+        let http = state.settings.use_masterbase_http();
+        let masterbase_host = state.settings.masterbase_host().to_owned();
+        Handled::future(async move {
+            let client = Client::new();
+            let endpoint = if http {
+                format!("http://{masterbase_host}/broadcasts")
+            } else {
+                format!("https://{masterbase_host}/broadcasts")
+            };
+
+            tracing::debug!("GET: {}", endpoint);
+            let response = match client.get(&endpoint).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    // TODO: prevent this error from being spammed when connection dies.
+                    tracing::error!("Failed to get broadcasts: {:?}", e);
+                    return None;
+                }
+            };
+
+            let broadcasts = response.json().await.expect("Failed to parse broadcasts");
+            let broadcast_response: BroadcastResponse = BroadcastResponse {
+                latest_update: Utc::now(),
+                broadcasts,
+            };
+
+            Some(OM::from(broadcast_response.clone()))
+        })
+    }
 }

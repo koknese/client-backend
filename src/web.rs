@@ -13,7 +13,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use event_loop::{try_get, Handled, Is, MessageHandler};
 use futures::Stream;
 use include_dir::Dir;
@@ -28,7 +28,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::command_manager::Command;
 use crate::{
-    events::{InternalPreferences, Preferences, UserUpdate, UserUpdates},
+    events::{
+        GitHubVersionLookup, GitHubVersionResponse, InternalPreferences, Preferences, UserUpdate,
+        UserUpdates,
+    },
+    masterbase::{BroadcastLookup, BroadcastResponse},
     player::{serialize_steamid_as_string, Friend, FriendInfo, Player, Players, SteamInfo},
     server::Gamemode,
     state::MACState,
@@ -60,6 +64,8 @@ pub enum WebRequest {
     PostCommand(RequestedCommands),
     GetChat(UnboundedSender<String>),
     GetKillfeed(UnboundedSender<String>),
+    GetMasterbaseBroadcasts(UnboundedSender<String>),
+    GetVersion(UnboundedSender<String>),
 }
 impl<S> event_loop::Message<S> for WebRequest {}
 
@@ -73,12 +79,21 @@ struct PostUserRequest {
 pub struct WebAPIHandler {
     profile_requests_in_progress: Vec<SteamID>,
     post_user_queue: Vec<PostUserRequest>,
+    masterbase_status_cache: Option<BroadcastResponse>,
 }
 
 impl<IM, OM> MessageHandler<MACState, IM, OM> for WebAPIHandler
 where
-    IM: Is<WebRequest> + Is<ProfileLookupResult>,
-    OM: Is<Command> + Is<Preferences> + Is<UserUpdates> + Is<ProfileLookupResult>,
+    IM: Is<WebRequest>
+        + Is<ProfileLookupResult>
+        + Is<BroadcastResponse>
+        + Is<GitHubVersionResponse>,
+    OM: Is<Command>
+        + Is<Preferences>
+        + Is<UserUpdates>
+        + Is<ProfileLookupResult>
+        + Is<BroadcastLookup>
+        + Is<GitHubVersionLookup>,
 {
     #[allow(clippy::cognitive_complexity)]
     fn handle_message(
@@ -94,6 +109,15 @@ where
 
         if let Some(lookup_result) = try_get::<ProfileLookupResult>(message) {
             self.handle_profile_lookup(state, lookup_result);
+        }
+
+        if let Some(masterbase_broadcasts) = try_get::<BroadcastResponse>(message) {
+            self.set_masterbase_broadcasts_response(masterbase_broadcasts);
+        }
+
+        if let Some(version_result) = try_get::<GitHubVersionResponse>(message) {
+            tracing::debug!("reply from github reached webhandler");
+            send(&version_result.tx, get_version_response(version_result));
         }
 
         match try_get::<WebRequest>(message)? {
@@ -129,6 +153,12 @@ where
             WebRequest::GetKillfeed(tx) => {
                 send(tx, get_killfeed_response(state));
             }
+            WebRequest::GetMasterbaseBroadcasts(tx) => {
+                return self.get_masterbase_broadcasts_response(tx);
+            }
+            WebRequest::GetVersion(tx) => {
+                return Handled::single(OM::from(GitHubVersionLookup { tx: tx.clone() }));
+            }
         }
 
         Handled::none()
@@ -141,8 +171,11 @@ impl WebAPIHandler {
         Self {
             profile_requests_in_progress: Vec::new(),
             post_user_queue: Vec::new(),
+            masterbase_status_cache: None,
         }
     }
+
+    // POST user
 
     fn handle_post_user_request<OM: Is<ProfileLookupResult>>(
         &mut self,
@@ -271,6 +304,30 @@ impl WebAPIHandler {
         self.post_user_queue
             .retain(|req| !req.waiting_users.is_empty());
     }
+
+    // Masterbase status
+
+    fn get_masterbase_broadcasts_response<OM: Is<BroadcastLookup>>(
+        &mut self,
+        req: &UnboundedSender<String>,
+    ) -> Option<Handled<OM>> {
+        if let Some(cache) = &self.masterbase_status_cache {
+            if cache.latest_update + Duration::seconds(60) > Utc::now() {
+                req.send(serde_json::to_string(&cache).expect("Epic serialization fail"))
+                    .ok();
+                return Handled::none();
+            }
+            self.masterbase_status_cache = None;
+        }
+        if self.masterbase_status_cache.is_none() {
+            return Handled::single(BroadcastLookup);
+        }
+        Handled::none()
+    }
+
+    fn set_masterbase_broadcasts_response(&mut self, result: &BroadcastResponse) {
+        self.masterbase_status_cache = Some(result.clone());
+    }
 }
 
 impl Default for WebAPIHandler {
@@ -321,6 +378,8 @@ pub async fn web_main(web_state: WebState, port: u16) {
         .route("/mac/commands/v1", post(post_commands))
         .route("/mac/chat/v1", get(get_chat))
         .route("/mac/killfeed/v1", get(get_killfeed))
+        .route("/mac/broadcasts/v1", get(get_masterbase_broadcasts))
+        .route("/mac/version/v1", get(get_version))
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(web_state);
 
@@ -718,6 +777,61 @@ async fn get_killfeed(State(state): State<WebState>) -> impl IntoResponse {
 
 fn get_killfeed_response(state: &MACState) -> String {
     serde_json::to_string(state.server.kill_history()).expect("Epic serialization fail")
+}
+
+// Masterbase status
+
+async fn get_masterbase_broadcasts(State(state): State<WebState>) -> impl IntoResponse {
+    tracing::debug!("API: GET Masterbase broadcasts");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    if state
+        .request
+        .send(WebRequest::GetMasterbaseBroadcasts(tx))
+        .is_err()
+    {
+        tracing::error!("Couldn't send API request to main thread.");
+    }
+    (rx.recv().await).map_or_else(
+        || (StatusCode::SERVICE_UNAVAILABLE, HEADERS, String::new()),
+        |resp| (StatusCode::OK, HEADERS, resp),
+    )
+}
+
+// Check for updates
+
+pub const MAC_VERSION: &str = "v0.2.0";
+pub const UPDATE_REPO: &str = "MegaAntiCheat/client-backend";
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct UserVersionResponse {
+    current_version: String,
+    latest_version: String,
+    notify: bool,
+}
+
+async fn get_version(State(state): State<WebState>) -> impl IntoResponse {
+    tracing::debug!("API: GET version");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    if state.request.send(WebRequest::GetVersion(tx)).is_err() {
+        tracing::error!("Couldn't send API request to main thread.");
+    }
+    (rx.recv().await).map_or_else(
+        || (StatusCode::SERVICE_UNAVAILABLE, HEADERS, String::new()),
+        |resp| (StatusCode::OK, HEADERS, resp),
+    )
+}
+
+fn get_version_response(message: &GitHubVersionResponse) -> String {
+    let current_version = MAC_VERSION.to_string();
+    let latest_version = message.latest_version.clone();
+    let response: UserVersionResponse = UserVersionResponse {
+        notify: latest_version > current_version,
+        current_version,
+        latest_version,
+    };
+    tracing::debug!("Version info: {:?}", &response);
+    serde_json::to_string(&response).expect("Epic serialization fail")
 }
 
 // Commands
